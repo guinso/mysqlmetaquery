@@ -8,7 +8,7 @@ import (
 	"github.com/guinso/rdbmstool"
 )
 
-//MetaQuery get MySQL data table meta information
+//MySQLMetaQuery get MySQL data table meta information
 type MySQLMetaQuery struct {
 }
 
