@@ -84,6 +84,32 @@ func (meta *MySQLMetaQuery) GetTableNames(db rdbmstool.DbHandlerProxy, databaseN
 	return result, nil
 }
 
+//GetTableNamesByPattern get list of data tables's name by using regular expression
+func (meta *MySQLMetaQuery) GetTableNamesByPattern(db rdbmstool.DbHandlerProxy, databaseName string, regex string) ([]string, error) {
+	rows, err := db.Query("SELECT table_name FROM information_schema.tables"+
+		" where table_schema=? AND table_name REGEXP '"+regex+"'", databaseName)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var result []string
+	for rows.Next() {
+		var tmp string
+		err := rows.Scan(&tmp)
+
+		if err != nil {
+			continue
+		}
+
+		result = append(result, tmp)
+	}
+
+	rows.Close()
+
+	return result, nil
+}
+
 //getLinkedFK get list of datatable(s) which has FK linked to specifed table name
 func getLinkedFK(db rdbmstool.DbHandlerProxy, databaseName string, tableName string) ([]string, error) {
 	rows, err := db.Query("SELECT table_name from information_schema.key_column_usage "+

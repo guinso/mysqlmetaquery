@@ -118,7 +118,7 @@ func convertWhereAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) 
 	return nil
 }
 
-func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefinition, error) {
+func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionDefinition, error) {
 	if ast.DataType != parser.NodeCondition {
 		return nil, fmt.Errorf(
 			"expect syntax tree is condition node but it is not (%T)", ast.DataType)
@@ -139,7 +139,7 @@ func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefiniti
 			return nil, tmpErr
 		}
 
-		cond.SetCondition(tmpCond)
+		cond.SetComplex(tmpCond)
 		break
 	case parser.NodeExpression:
 		tmpExpr, tmpErr := convertExpression(&ast.ChildNodes[0])
@@ -147,7 +147,7 @@ func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefiniti
 			return nil, tmpErr
 		}
 
-		cond.LeftExpression = tmpExpr
+		cond.SetCondition(tmpExpr)
 		break
 	default:
 		return nil, fmt.Errorf("Condition ast's 1st node must be expression or sub condition")
@@ -178,10 +178,10 @@ func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefiniti
 			}
 
 			if token.Type == parser.TokenOr {
-				cond.Group(rdbmstool.OR, tmpExpr)
+				cond.AddOr(tmpExpr)
+			} else {
+				cond.AddAnd(tmpExpr)
 			}
-
-			cond.Group(rdbmstool.AND, tmpExpr)
 
 			index += 2
 			continue
@@ -192,10 +192,10 @@ func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefiniti
 			}
 
 			if token.Type == parser.TokenOr {
-				cond.Group(rdbmstool.OR, tmpCond)
+				cond.AddOrComplex(tmpCond)
+			} else {
+				cond.AddAndComplex(tmpCond)
 			}
-
-			cond.Group(rdbmstool.AND, tmpCond)
 
 			index += 2
 			continue
@@ -211,7 +211,7 @@ func convertCondition(ast *parser.SyntaxTree) (*rdbmstool.ConditionGroupDefiniti
 
 func convertExpression(ast *parser.SyntaxTree) (string, error) {
 	if ast.DataType != parser.NodeExpression {
-		return nil, fmt.Errorf("ast is not an expression node")
+		return "", fmt.Errorf("ast is not an expression node")
 	}
 
 	return ast.RawString(), nil
@@ -225,7 +225,7 @@ func convertJoinAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) e
 	lhs := ""
 	rhs := ""
 	var join rdbmstool.JoinType
-	var operator rdbmstool.ConditionOperator
+	//var operator rdbmstool.ConditionOperator
 
 	join, joinErr := getJoinType(ast.Source[ast.StartPosition].Type)
 	if joinErr != nil {
@@ -254,6 +254,7 @@ func convertJoinAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) e
 	}
 
 	//condition
+	var operator string
 	if nodeLen > index {
 		//left hand side
 		if ast.ChildNodes[index].DataType == parser.NodeCondition {
@@ -269,13 +270,14 @@ func convertJoinAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) e
 		//operator
 		if nodeLen > index && ast.ChildNodes[index].DataType == parser.NodeOperator {
 			token := ast.ChildNodes[index].Source[ast.ChildNodes[index].StartPosition]
-			operator123, operatorErr := getConditionOperator(token.Type)
-			operator = operator123
+			//operator123, operatorErr := getConditionOperator(token.Type)
+			//operator = operator123
+			operator = token.String()
 			index++
 
-			if operatorErr != nil {
-				return operatorErr
-			}
+			// if operatorErr != nil {
+			// 	return operatorErr
+			// }
 		} else {
 			return fmt.Errorf("Cannot find operator for JOIN condition syntax tree")
 		}
@@ -292,7 +294,7 @@ func convertJoinAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) e
 		}
 	}
 
-	viewDef.Query.JoinSimple(source, alias, join, lhs, rhs, operator)
+	viewDef.Query.JoinAdd(source, alias, join, lhs+" "+operator+" "+rhs)
 
 	return nil
 }
@@ -300,48 +302,48 @@ func convertJoinAST(viewDef *rdbmstool.ViewDefinition, ast *parser.SyntaxTree) e
 func getJoinType(token parser.TokenType) (rdbmstool.JoinType, error) {
 	switch token {
 	case parser.TokenJoin:
-		return rdbmstool.JOIN, nil
+		return rdbmstool.Join, nil
 	case parser.TokenLeftJoin:
-		return rdbmstool.LEFT_JOIN, nil
+		return rdbmstool.LeftJoin, nil
 	case parser.TokenRightJoin:
-		return rdbmstool.RIGHT_JOIN, nil
+		return rdbmstool.RightJoin, nil
 	case parser.TokenInnerJoin:
-		return rdbmstool.INNER_JOIN, nil
+		return rdbmstool.InnerJoin, nil
 	case parser.TokenOuterJoin:
-		return rdbmstool.OUTER_JOIN, nil
+		return rdbmstool.OuterJoin, nil
 	default:
-		return rdbmstool.JOIN, fmt.Errorf(
+		return rdbmstool.Join, fmt.Errorf(
 			"unsupported token found for JOIN type (%s)",
 			token.String())
 	}
 }
 
-func getConditionOperator(token parser.TokenType) (rdbmstool.ConditionOperator, error) {
-	switch token {
-	case parser.TokenEqual:
-		return rdbmstool.EQUAL, nil
-	case parser.TokenNotEqual:
-		return rdbmstool.NOT_EQUAL, nil
-	case parser.TokenGreater:
-		return rdbmstool.GREATER_THAN, nil
-	case parser.TokenGreaterEqual:
-		return rdbmstool.GREATER_THAN_EQUAL, nil
-	case parser.TokenLesser:
-		return rdbmstool.LESS_THAN, nil
-	case parser.TokenLesserEqual:
-		return rdbmstool.LESS_THAN_EQUAL, nil
-	case parser.TokenBetween:
-		return rdbmstool.BETWEEN, nil
-	case parser.TokenLike:
-		return rdbmstool.LIKE, nil
-	case parser.TokenIn:
-		return rdbmstool.IN, nil
-	default:
-		return rdbmstool.EQUAL,
-			fmt.Errorf("unsupported token found for JOIN condition operator (%s)",
-				token.String())
-	}
-}
+// func getConditionOperator(token parser.TokenType) (rdbmstool.ConditionOperator, error) {
+// 	switch token {
+// 	case parser.TokenEqual:
+// 		return rdbmstool.EQUAL, nil
+// 	case parser.TokenNotEqual:
+// 		return rdbmstool.NOT_EQUAL, nil
+// 	case parser.TokenGreater:
+// 		return rdbmstool.GREATER_THAN, nil
+// 	case parser.TokenGreaterEqual:
+// 		return rdbmstool.GREATER_THAN_EQUAL, nil
+// 	case parser.TokenLesser:
+// 		return rdbmstool.LESS_THAN, nil
+// 	case parser.TokenLesserEqual:
+// 		return rdbmstool.LESS_THAN_EQUAL, nil
+// 	case parser.TokenBetween:
+// 		return rdbmstool.BETWEEN, nil
+// 	case parser.TokenLike:
+// 		return rdbmstool.LIKE, nil
+// 	case parser.TokenIn:
+// 		return rdbmstool.IN, nil
+// 	default:
+// 		return rdbmstool.EQUAL,
+// 			fmt.Errorf("unsupported token found for JOIN condition operator (%s)",
+// 				token.String())
+// 	}
+// }
 
 func getViewDefinition(db rdbmstool.DbHandlerProxy, dbName string, viewName string) (string, error) {
 	rows, err := db.Query("SELECT VIEW_DEFINITION "+
